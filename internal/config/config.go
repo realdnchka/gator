@@ -5,7 +5,6 @@ import (
 	"os"
 )
 
-
 type Config struct {
 	DBUrl    string `json:"db_url"`
 	UserName string `json:"current_user_name"`
@@ -25,7 +24,10 @@ func Read() (Config, error) {
 		return c, err
 	}
 
-	json.Unmarshal(file, &c)
+	if err := json.Unmarshal(file, &c); err != nil {
+		return c, err
+	}
+	c.DBUrl = "postgres://rd:@localhost:5432/gator?sslmode=disable"
 	return c, nil
 }
 
@@ -46,7 +48,7 @@ func (c Config) SetUser(u string) error {
 		return err
 	}
 
-	if err := os.WriteFile(homeDir + configFileName, jsonbytes, os.ModeAppend); err != nil {
+	if err := os.WriteFile(homeDir+configFileName, jsonbytes, os.ModeAppend); err != nil {
 		return err
 	}
 	return nil

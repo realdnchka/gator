@@ -1,10 +1,14 @@
 package main
 
 import (
+	"database/sql"
 	"log"
 	"os"
 
 	"github.com/realdnchka/gator-go/internal/config"
+	"github.com/realdnchka/gator-go/internal/database"
+
+	_ "github.com/lib/pq"
 )
 
 var cmds commands = commands{
@@ -19,14 +23,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("%v\n", err)
 	}
-	state.Config = &cfg
+	state.cfg = &cfg
 
 	if len(os.Args) <= 1 {
 		log.Fatalf("missing command")
 	}
-
 	if len(os.Args) == 2 {
 		log.Fatalf("missing parameter")
+	}
+	db, err := sql.Open("postgres", state.cfg.DBUrl)
+	state.db = database.New(db)
+
+	if err != nil {
+		log.Fatalf("could not connect to db: %v", err)
 	}
 
 	cmd := command{
@@ -34,5 +43,7 @@ func main() {
 		Args: os.Args[2:],
 	}
 
-	cmds.run(&state, cmd)
+	if err = cmds.run(&state, cmd); err != nil {
+		log.Fatalf("could not run a command: %v", err)
+	}
 }
