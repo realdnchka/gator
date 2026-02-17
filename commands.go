@@ -78,15 +78,20 @@ func resetHandler(s *state, cmd command) error {
 	return nil
 }
 
-func aggHandler(s *state, cmd command) error {
-	feedURL := "https://www.wagslane.dev/index.xml"
-	rssFeed, err := rss.FetchFeed(context.Background(), feedURL)
+func aggHandler(s *state, cmd command, user database.User) error {
+	if len(cmd.Args) < 1 {
+		return errors.New("expected 1 argument: time between requests")
+	}
+	timeBetweenRequests, err := time.ParseDuration(cmd.Args[0])
 	if err != nil {
 		return err
 	}
-
-	log.Printf("%v", *rssFeed)
-	return nil
+	
+	fmt.Printf("Collecting feeds every %v\n", timeBetweenRequests)
+	ticker := time.NewTicker(timeBetweenRequests)
+	for ; ; <-ticker.C {
+		scrapeFeeds(s, user)
+	}
 }
 
 func usersHandler(s *state, cmd command) error {
@@ -199,7 +204,7 @@ func followingHandler(s *state, cmd command, user database.User) error {
 	}
 	fmt.Printf("%s follows next RSS:\n", user.Name)
 	for _, f := range feeds {
-		fmt.Printf("%s", f.FeedName)
+		fmt.Printf("%s\n", f.FeedName)
 	}
 	return nil
 }
@@ -218,6 +223,25 @@ func unfollowHandler(s *state, cmd command, user database.User) error {
 	return nil
 }
 
+func browseHandler(s *state, cmd command, user database.User) error {
+	db := s.db
+	var limit int32
+	if len(cmd.Args) == 0 {
+		limit = 2
+	}
+	posts, err := db.GetPostsByLimit(context.Background(), database.GetPostsByLimitParams{
+		UserID: user.ID,
+		Limit: limit,
+	})
+	if err != nil {
+		return err
+	}
+	for _, p := range posts {
+		fmt.Printf("%s\n%s\n%v\n", p.Title, p.Description, p.PublishedAt)
+	}
+	return nil
+}
+
 func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error{
 	f := func(s *state, cmd command) error {
 		db := s.db
@@ -229,6 +253,56 @@ func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) 
 		return nil
 	}
 	return f
+}
+
+func scrapeFeeds(s *state, user database.User) {
+	db := s.db
+	feedtf, err := db.GetNextFeedToFetch(context.Background())
+	if err != nil {
+		log.Fatalf("cannot get next feed to fetch: %v", err)
+	}
+	err = db.MarkFeedFetched(context.Background(), feedtf.ID)
+	if err != nil {
+		log.Fatalf("cannot mark feed: %v", err)
+	}
+
+	feed, err := rss.FetchFeed(context.Background(), feedtf.Url)
+	if err != nil {
+		log.Fatalf("cannot fetch feed: %v", err)
+	}
+	
+	for _, f := range feed.Channel.Items {
+		pubtime, err := time.Parse(time.RFC1123, f.PubDate)
+		if err != nil {
+			log.Fatal(err)
+		}
+		
+		posts, err := db.GetPosts(context.Background(), user.ID)
+		if err != nil {
+			log.Fatalf("cannot get posts: %v", err)
+		}
+
+		for _, p := range posts {
+			p.Url = f.Link
+			continue
+		}
+
+		post := database.CreatePostParams {
+			ID: uuid.New(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			Title: f.Title,
+			Url: f.Link,
+			Description: f.Description,
+			PublishedAt: pubtime,
+			FeedID: feedtf.ID,
+		}
+		
+		_, err = db.CreatePost(context.Background(), post)
+		if err != nil {
+			log.Fatalf("cannot create a post: %v", err)
+		}
+	}
 }
 
 func (c *commands) run(s *state, cmd command) error {
