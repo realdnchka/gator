@@ -1,0 +1,2 @@
+-- name: GetFeedFollowsForUser :many
+SELECT u.name AS user_name, f.name AS feed_name FROM feed_follows AS ff JOIN users AS u ON u.id = ff.user_id JOIN feeds AS f ON f.id = ff.feed_id WHERE ff.user_id = $1;
